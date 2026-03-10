@@ -7,6 +7,14 @@ on:
         description: '追跡番号 (例: 1234567890123)'
         required: true
         type: string
+      carrier:
+        description: '配送業者'
+        required: true
+        default: 'japanpost'
+        type: choice
+        options:
+          - japanpost
+          - yamato
       action:
         description: 'アクション'
         required: true
@@ -36,7 +44,7 @@ jobs:
       - name: Run registration
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: python scripts/check.py ${{ inputs.action }} "${{ inputs.tracking_number }}"
+        run: python scripts/check.py ${{ inputs.action }} "${{ inputs.tracking_number }}" ${{ inputs.carrier }}
 
       - name: Commit updated tracking data
         run: |

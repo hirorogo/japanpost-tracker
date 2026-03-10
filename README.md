@@ -1,6 +1,6 @@
 # japanpost-tracker
 
-日本郵便の追跡番号をスクレイプして配送状況を取得する Python ライブラリ & Discord 通知ボット。
+日本郵便・ヤマト運輸の追跡番号をスクレイプして配送状況を取得する Python ライブラリ & Discord 通知ボット。
 
 GitHub Actions だけで動くサーバーレス構成。追跡番号を登録すると1時間おきに配送状況をチェックし、変化があれば Discord に通知します。
 
@@ -9,7 +9,7 @@ GitHub Actions (cron: 毎時0分)
   ↓
 scripts/check.py (Python スクレイピング)
   ↓
-Japan Post 追跡ページをスクレイプ
+日本郵便 or ヤマト運輸の追跡ページをスクレイプ
   ↓
 data/trackings.json と比較
   ↓ 変化あり
@@ -18,11 +18,18 @@ Discord Webhook で通知
 data/trackings.json を更新 & git commit
 ```
 
+### 対応キャリア
+
+| キャリア | キャリアID | 追跡元 |
+|---|---|---|
+| 日本郵便 | `japanpost` | trackings.post.japanpost.jp |
+| ヤマト運輸 | `yamato` | toi.kuronekoyamato.co.jp |
+
 ---
 
 ## ライブラリとして使う（pip install）
 
-誰でも `pip install` するだけで日本郵便の追跡情報を取得できます。
+誰でも `pip install` するだけで追跡情報を取得できます。
 
 ### インストール
 
@@ -33,18 +40,24 @@ pip install git+https://github.com/hirorogo/japanpost-tracker.git
 ### 基本的な使い方
 
 ```python
-from japanpost_tracker import track
+from japanpost_tracker import track, track_yamato
 
+# 日本郵便
 result = track("1234567890123")
 
-print(result.latest_status)    # "引受"
-print(result.product_type)     # "クリックポスト"
+# ヤマト運輸
+result = track_yamato("123456789012")
+
+print(result.latest_status)    # "引受" / "配達完了"
+print(result.carrier)          # "japanpost" / "yamato"
+print(result.carrier_name)     # "日本郵便" / "ヤマト運輸"
+print(result.product_type)     # "クリックポスト" / "ヤマト運輸"
 print(result.is_delivered)     # False
-print(result.url)              # Japan Post 追跡ページURL
+print(result.url)              # 追跡ページURL
 
 # 全履歴を取得
 for entry in result.entries:
-    print(f"{entry.date} | {entry.status} | {entry.office} ({entry.prefecture})")
+    print(f"{entry.date} | {entry.status} | {entry.office}")
 
 # JSON として出力
 print(result.to_json())
@@ -56,24 +69,33 @@ data = result.to_dict()
 ### 複数番号を一括取得
 
 ```python
-from japanpost_tracker import track_multi, TrackingError
+from japanpost_tracker import track_multi, track_yamato_multi, TrackingError
 
+# 日本郵便
 results = track_multi(["1234567890123", "123456789012"])
+
+# ヤマト運輸
+results = track_yamato_multi(["123456789012", "098765432109"])
 
 for r in results:
     if isinstance(r, TrackingError):
         print(f"Error: {r}")
     else:
-        print(f"{r.tracking_number}: {r.latest_status}")
+        print(f"[{r.carrier_name}] {r.tracking_number}: {r.latest_status}")
 ```
 
 ### エラーハンドリング
 
 ```python
-from japanpost_tracker import track, TrackingError
+from japanpost_tracker import track, track_yamato, TrackingError
 
 try:
     result = track("000000000000")
+except TrackingError as e:
+    print(f"取得失敗: {e}")
+
+try:
+    result = track_yamato("000000000000")
 except TrackingError as e:
     print(f"取得失敗: {e}")
 ```
@@ -83,6 +105,8 @@ except TrackingError as e:
 | プロパティ | 型 | 説明 |
 |---|---|---|
 | `tracking_number` | `str` | 追跡番号 |
+| `carrier` | `str` | キャリアID（`japanpost` / `yamato`） |
+| `carrier_name` | `str` | キャリア名（日本郵便 / ヤマト運輸） |
 | `product_type` | `str` | 商品種別（ゆうパック、クリックポスト等） |
 | `entries` | `list[TrackingEntry]` | 配送履歴リスト |
 | `contacts` | `list[ContactOffice]` | 問い合わせ窓口局 |
@@ -90,7 +114,7 @@ except TrackingError as e:
 | `latest_entry` | `TrackingEntry \| None` | 最新の履歴エントリ |
 | `is_delivered` | `bool` | 配達完了フラグ |
 | `entries_hash` | `str` | 履歴の SHA256 ハッシュ（変化検出用） |
-| `url` | `str` | Japan Post 追跡ページURL |
+| `url` | `str` | 追跡ページURL |
 | `checked_at` | `str` | 取得日時 (ISO 8601) |
 
 ---
@@ -104,6 +128,7 @@ except TrackingError as e:
 ```
 GitHub Actions (毎時 cron)
   → scripts/check.py が全登録番号をスクレイプ
+  → キャリアごとに適切な追跡ページを参照
   → 前回のハッシュと比較
   → 変化あり → Discord Webhook で通知
   → data/trackings.json を自動 commit
@@ -135,14 +160,14 @@ GitHub リポジトリの **Actions** タブから操作します。
 
 | 操作 | 手順 |
 |---|---|
-| **登録** | Actions → `Register Tracking Number` → Run workflow → 番号入力 → アクション `register` |
+| **登録** | Actions → `Register Tracking Number` → Run workflow → 番号入力 → 配送業者選択（`japanpost` / `yamato`） → アクション `register` |
 | **削除** | 同上 → アクション `remove` |
 | **手動チェック** | Actions → `Check Tracking Updates` → Run workflow |
 
 ### Discord 通知イメージ
 
 ```
-🚚 配送状況が更新されました: 1234567890123
+[日本郵便] 配送状況が更新されました: 1234567890123
 
 商品種別: クリックポスト
 
@@ -155,6 +180,16 @@ GitHub リポジトリの **Actions** タブから操作します。
 △△郵便局 (大阪府) 〒530-0001
 ```
 
+```
+[ヤマト運輸] 配送状況が更新されました: 123456789012
+
+商品種別: ヤマト運輸
+
+03/10 12:00
+荷物受付
+○○センター
+```
+
 ---
 
 ## ファイル構成
@@ -162,7 +197,8 @@ GitHub リポジトリの **Actions** タブから操作します。
 ```
 japanpost_tracker/         # pip install 可能なパッケージ
   __init__.py
-  scraper.py               # コアのスクレイピングロジック
+  scraper.py               # 日本郵便スクレイピング & 共通データクラス
+  yamato_scraper.py         # ヤマト運輸スクレイピング
 api/
   tracking.py              # Vercel Serverless API エンドポイント
 scripts/
@@ -181,11 +217,14 @@ pyproject.toml             # パッケージ設定
 Vercel にデプロイすると HTTP API としても使えます。
 
 ```bash
-# 1件取得
+# 日本郵便（デフォルト）
 curl "https://your-app.vercel.app/api/tracking?number=1234567890123"
 
+# ヤマト運輸
+curl "https://your-app.vercel.app/api/tracking?number=123456789012&carrier=yamato"
+
 # 複数取得（カンマ区切り）
-curl "https://your-app.vercel.app/api/tracking?number=1234567890123,123456789012"
+curl "https://your-app.vercel.app/api/tracking?number=1234567890123,123456789012&carrier=japanpost"
 ```
 
 デプロイ:

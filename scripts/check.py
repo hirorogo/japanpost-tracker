@@ -1,7 +1,8 @@
 """
-Japan Post 追跡チェッカー (GitHub Actions 用)
+配送追跡チェッカー (GitHub Actions 用)
 - data/trackings.json に登録された追跡番号をチェック
 - 前回の状態と比較し、変化があれば Discord Webhook で通知
+- 日本郵便・ヤマト運輸に対応
 """
 
 import json
@@ -13,10 +14,22 @@ import requests
 
 # パッケージを import（pip install -e . 済み or PYTHONPATH で参照）
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from japanpost_tracker import track, TrackingResult, TrackingError
+from japanpost_tracker import track, track_yamato, TrackingResult, TrackingError
 
 DATA_FILE = os.path.join(os.path.dirname(__file__), "..", "data", "trackings.json")
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")
+
+CARRIER_NAMES = {
+    "japanpost": "日本郵便",
+    "yamato": "ヤマト運輸",
+}
+
+
+def track_by_carrier(tracking_number: str, carrier: str) -> TrackingResult:
+    """キャリアに応じた追跡関数を呼び出す"""
+    if carrier == "yamato":
+        return track_yamato(tracking_number)
+    return track(tracking_number)
 
 
 def send_discord_notification(result: TrackingResult, is_new: bool = False):
@@ -25,10 +38,11 @@ def send_discord_notification(result: TrackingResult, is_new: bool = False):
         print("DISCORD_WEBHOOK_URL が設定されていません。通知をスキップします。")
         return
 
+    carrier_label = CARRIER_NAMES.get(result.carrier, result.carrier)
     title = (
-        f"📦 追跡番号を登録しました: {result.tracking_number}"
+        f"[{carrier_label}] 追跡番号を登録しました: {result.tracking_number}"
         if is_new
-        else f"🚚 配送状況が更新されました: {result.tracking_number}"
+        else f"[{carrier_label}] 配送状況が更新されました: {result.tracking_number}"
     )
     color = 0x3498DB if is_new else 0x2ECC71
 
@@ -54,7 +68,7 @@ def send_discord_notification(result: TrackingResult, is_new: bool = False):
         })
 
     if result.is_delivered:
-        title = f"✅ 配達完了: {result.tracking_number}"
+        title = f"[{carrier_label}] 配達完了: {result.tracking_number}"
         color = 0xE74C3C
 
     embed = {
@@ -85,21 +99,23 @@ def save_data(data: dict):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-def register_tracking(tracking_number: str):
+def register_tracking(tracking_number: str, carrier: str = "japanpost"):
     """新しい追跡番号を登録"""
     tracking_number = tracking_number.strip().replace("-", "")
     data = load_data()
     is_new = tracking_number not in data
 
+    carrier_label = CARRIER_NAMES.get(carrier, carrier)
     if not is_new:
-        print(f"追跡番号 {tracking_number} は既に登録済み。再チェックします...")
+        print(f"追跡番号 {tracking_number} ({carrier_label}) は既に登録済み。再チェックします...")
     else:
-        print(f"追跡番号 {tracking_number} を登録します...")
+        print(f"追跡番号 {tracking_number} ({carrier_label}) を登録します...")
 
     print("  追跡情報を取得中...")
-    result = track(tracking_number)
+    result = track_by_carrier(tracking_number, carrier)
 
     data[tracking_number] = {
+        "carrier": carrier,
         "entries_hash": result.entries_hash,
         "product_type": result.product_type,
         "latest_status": result.latest_status or "不明",
@@ -122,9 +138,11 @@ def check_all():
     has_changes = False
 
     for tracking_number, stored in data.items():
-        print(f"チェック中: {tracking_number}")
+        carrier = stored.get("carrier", "japanpost")
+        carrier_label = CARRIER_NAMES.get(carrier, carrier)
+        print(f"チェック中: {tracking_number} ({carrier_label})")
         try:
-            result = track(tracking_number)
+            result = track_by_carrier(tracking_number, carrier)
             old_hash = stored.get("entries_hash", "")
 
             if result.entries_hash != old_hash:
@@ -133,6 +151,7 @@ def check_all():
                 print(f"    今回: {result.latest_status}")
 
                 data[tracking_number] = {
+                    "carrier": carrier,
                     "entries_hash": result.entries_hash,
                     "product_type": result.product_type,
                     "latest_status": result.latest_status or "不明",
@@ -168,14 +187,15 @@ def remove_tracking(tracking_number: str):
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("使用方法:")
-        print("  python check.py register <追跡番号>")
+        print("  python check.py register <追跡番号> [japanpost|yamato]")
         print("  python check.py check")
         print("  python check.py remove <追跡番号>")
         sys.exit(1)
 
     command = sys.argv[1]
     if command == "register" and len(sys.argv) >= 3:
-        register_tracking(sys.argv[2])
+        carrier = sys.argv[3] if len(sys.argv) >= 4 else "japanpost"
+        register_tracking(sys.argv[2], carrier)
     elif command == "check":
         check_all()
     elif command == "remove" and len(sys.argv) >= 3:

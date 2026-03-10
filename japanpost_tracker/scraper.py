@@ -33,6 +33,7 @@ __all__ = [
 ]
 
 JAPANPOST_URL = "https://trackings.post.japanpost.jp/services/srv/search/direct"
+YAMATO_URL = "https://toi.kuronekoyamato.co.jp/cgi-bin/tneko"
 JST = timezone(timedelta(hours=9))
 
 
@@ -74,6 +75,7 @@ class TrackingResult:
     entries: list[TrackingEntry] = field(default_factory=list)
     contacts: list[ContactOffice] = field(default_factory=list)
     checked_at: str = ""
+    carrier: str = "japanpost"
 
     @property
     def latest_status(self) -> Optional[str]:
@@ -90,7 +92,9 @@ class TrackingResult:
         """配達済みかどうか"""
         if not self.entries:
             return False
-        return self.entries[-1].status in ("お届け先にお届け済み", "お届け済み", "配達完了")
+        return self.entries[-1].status in (
+            "お届け先にお届け済み", "お届け済み", "配達完了",
+        )
 
     @property
     def entries_hash(self) -> str:
@@ -104,12 +108,21 @@ class TrackingResult:
 
     @property
     def url(self) -> str:
-        """Japan Post 追跡ページURL"""
+        """追跡ページURL"""
+        if self.carrier == "yamato":
+            return f"{YAMATO_URL}?number01={self.tracking_number}"
         return f"{JAPANPOST_URL}?searchKind=S002&locale=ja&reqCodeNo1={self.tracking_number}"
+
+    @property
+    def carrier_name(self) -> str:
+        """配送業者名"""
+        return {"japanpost": "日本郵便", "yamato": "ヤマト運輸"}.get(self.carrier, self.carrier)
 
     def to_dict(self) -> dict:
         return {
             "tracking_number": self.tracking_number,
+            "carrier": self.carrier,
+            "carrier_name": self.carrier_name,
             "product_type": self.product_type,
             "entries": [e.to_dict() for e in self.entries],
             "contacts": [c.to_dict() for c in self.contacts],

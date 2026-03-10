@@ -1,8 +1,11 @@
 """
-Japan Post 追跡 API (Vercel Serverless Function)
+配送追跡 API (Vercel Serverless Function)
 
 GET /api/tracking?number=1234567890123
 GET /api/tracking?number=1234567890123,123456789012
+GET /api/tracking?number=123456789012&carrier=yamato
+
+carrier: japanpost (default) | yamato
 """
 
 import json
@@ -12,7 +15,7 @@ from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from japanpost_tracker import track, track_multi, TrackingError
+from japanpost_tracker import track, track_multi, track_yamato, track_yamato_multi, TrackingError
 
 
 class handler(BaseHTTPRequestHandler):
@@ -20,11 +23,19 @@ class handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         params = parse_qs(parsed.query)
         numbers = params.get("number", [])
+        carrier = params.get("carrier", ["japanpost"])[0]
+
+        if carrier not in ("japanpost", "yamato"):
+            self._json(400, {
+                "error": "carrier は japanpost または yamato を指定してください",
+            })
+            return
 
         if not numbers:
             self._json(400, {
                 "error": "number パラメータが必要です",
-                "usage": "GET /api/tracking?number=1234567890123",
+                "usage": "GET /api/tracking?number=1234567890123&carrier=japanpost",
+                "carriers": ["japanpost", "yamato"],
             })
             return
 
@@ -37,14 +48,17 @@ class handler(BaseHTTPRequestHandler):
             self._json(400, {"error": "一度に10件まで"})
             return
 
+        track_fn = track_yamato if carrier == "yamato" else track
+        track_multi_fn = track_yamato_multi if carrier == "yamato" else track_multi
+
         if len(tracking_numbers) == 1:
             try:
-                result = track(tracking_numbers[0])
+                result = track_fn(tracking_numbers[0])
                 self._json(200, result.to_dict())
             except TrackingError as e:
                 self._json(404, {"error": str(e)})
         else:
-            results = track_multi(tracking_numbers)
+            results = track_multi_fn(tracking_numbers)
             out = []
             for r in results:
                 if isinstance(r, TrackingError):
