@@ -1,0 +1,37 @@
+name: Check Tracking Updates
+
+on:
+  schedule:
+    # 1時間おきに実行 (UTC)
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r scripts/requirements.txt
+
+      - name: Check all tracking numbers
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python scripts/check.py check
+
+      - name: Commit updated tracking data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/trackings.json
+          git diff --staged --quiet || git commit -m "update: tracking data $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push

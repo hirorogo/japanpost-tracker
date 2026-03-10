@@ -1,0 +1,47 @@
+name: Register Tracking Number
+
+on:
+  workflow_dispatch:
+    inputs:
+      tracking_number:
+        description: '追跡番号 (例: 1234567890123)'
+        required: true
+        type: string
+      action:
+        description: 'アクション'
+        required: true
+        default: 'register'
+        type: choice
+        options:
+          - register
+          - remove
+
+permissions:
+  contents: write
+
+jobs:
+  register:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r scripts/requirements.txt
+
+      - name: Run registration
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python scripts/check.py ${{ inputs.action }} "${{ inputs.tracking_number }}"
+
+      - name: Commit updated tracking data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/trackings.json
+          git diff --staged --quiet || git commit -m "${{ inputs.action }}: ${{ inputs.tracking_number }}"
+          git push
