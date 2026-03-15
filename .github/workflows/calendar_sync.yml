@@ -1,0 +1,37 @@
+name: Calendar Sync (TimeTree <-> Google)
+
+on:
+  schedule:
+    # 15分ごとに同期
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install requests google-api-python-client google-auth
+
+      - name: Run sync
+        env:
+          TIMETREE_ACCESS_TOKEN: ${{ secrets.TIMETREE_ACCESS_TOKEN }}
+          TIMETREE_CALENDAR_ID: ${{ secrets.TIMETREE_CALENDAR_ID }}
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+          GOOGLE_CALENDAR_ID: ${{ secrets.GOOGLE_CALENDAR_ID }}
+        run: python scripts/calendar_sync.py
+
+      - name: Commit mapping updates
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/sync_mappings.json
+          git diff --staged --quiet || git commit -m "sync: update calendar mappings"
+          git push
