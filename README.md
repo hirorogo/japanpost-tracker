@@ -192,6 +192,74 @@ GitHub リポジトリの **Actions** タブから操作します。
 
 ---
 
+## TimeTree ↔ Google Calendar 双方向同期
+
+TimeTree と Google Calendar を自動で双方向同期する機能です。GitHub Actions で15分ごとに動作します。
+
+### 仕組み
+
+```
+GitHub Actions (cron: 15分ごと)
+  ↓
+scripts/calendar_sync.py
+  ↓
+TimeTree API / Google Calendar API から予定を取得
+  ↓
+未同期の予定を相手側に作成（名前の末尾に「douki」を付与）
+  ↓ 変更あり
+変更された側の内容をもう片方に反映
+  ↓
+data/sync_mappings.json を更新 & git commit
+```
+
+- **新規予定**: 片方に予定を作ると、もう片方にも `予定名 douki` として自動作成
+- **変更反映**: 片方の予定を編集すると、次回同期時にもう片方へ反映
+- **削除反映**: 片方の予定を消すと、もう片方も自動削除
+- **競合解決**: 両方で同時に変更された場合は、更新日時が新しい方を優先
+
+### セットアップ
+
+#### 1. TimeTree アクセストークンの取得
+
+1. [TimeTree Developer](https://developers.timetreeapp.com/) にログイン
+2. **パーソナルアクセストークン** を発行
+3. 同期したいカレンダーの **カレンダーID** を取得
+
+#### 2. Google サービスアカウントの作成
+
+1. [Google Cloud Console](https://console.cloud.google.com/) でプロジェクトを作成
+2. **Google Calendar API** を有効化
+3. **サービスアカウント** を作成し、JSON キーをダウンロード
+4. 同期先の Google カレンダーの共有設定で、サービスアカウントのメールアドレスに **編集権限** を付与
+
+#### 3. GitHub Secrets を設定
+
+フォークしたリポジトリの **Settings → Secrets and variables → Actions** で以下を追加:
+
+| Secret 名 | 説明 |
+|---|---|
+| `TIMETREE_ACCESS_TOKEN` | TimeTree パーソナルアクセストークン |
+| `TIMETREE_CALENDAR_ID` | 同期対象の TimeTree カレンダーID |
+| `GOOGLE_CREDENTIALS_JSON` | サービスアカウントの認証情報 JSON（ファイルの中身をそのまま貼る） |
+| `GOOGLE_CALENDAR_ID` | 同期先の Google カレンダーID（省略時は `primary`） |
+
+設定後、Actions タブから `Calendar Sync` ワークフローを手動実行して動作確認できます。
+
+### ローカルで実行
+
+```bash
+pip install requests google-api-python-client google-auth
+
+export TIMETREE_ACCESS_TOKEN="your-token"
+export TIMETREE_CALENDAR_ID="your-calendar-id"
+export GOOGLE_CREDENTIALS_JSON='{"type":"service_account",...}'
+export GOOGLE_CALENDAR_ID="primary"
+
+python scripts/calendar_sync.py
+```
+
+---
+
 ## ファイル構成
 
 ```
@@ -202,13 +270,16 @@ japanpost_tracker/         # pip install 可能なパッケージ
 api/
   tracking.py              # Vercel Serverless API エンドポイント
 scripts/
-  check.py                 # GitHub Actions 用 CLI
+  check.py                 # GitHub Actions 用 CLI（追跡）
+  calendar_sync.py         # TimeTree ↔ Google Calendar 同期
   requirements.txt
 data/
   trackings.json           # 追跡データ（自動更新）
+  sync_mappings.json       # カレンダー同期マッピング（自動更新）
 .github/workflows/
   register.yml             # 追跡番号の登録・削除
   check.yml                # 1時間ごとの定期チェック
+  calendar_sync.yml        # 15分ごとのカレンダー同期
 pyproject.toml             # パッケージ設定
 ```
 
